@@ -19,6 +19,26 @@ It does **not**:
 Those concerns belong in the *consumer* package (e.g. `llm_connections`, which
 depends on this one for its Slurm bits and adds the higher-level orchestration).
 
+## Scheduler and startup guarantees
+
+Scheduler reads retry transient failures within three attempts. An unreadable
+queue raises an error; it never establishes that a job is absent. Discovery
+prefers RUNNING jobs over CONFIGURING and PENDING jobs. Polling checks terminal
+states in accounting when jobs disappear from the queue. Submission is not
+retried after an ambiguous SSH failure.
+
+The bundled Ollama template chooses an available port, checks listener and
+preload success, publishes the endpoint atomically, and removes it on exit.
+`num_ctx`, `load_timeout`, and `preload_timeout` are configurable sbatch
+parameters (defaults: 8192, 10m, 900 seconds). Endpoint waiting defaults to 1080
+seconds. `read_endpoint_file(..., job_id=..., include_gateway=True)` also checks
+job termination and returns `(host, port, login_gateway_address)` for consumers
+that need to pin forwarding to the working SSH gateway.
+
+Paths beginning with `~/` refer to the remote user's home. In `#SBATCH` log
+directives they become relative paths, because Slurm does not run shell
+expansion on directives and SSH submission runs from the remote home.
+
 ## Layout
 
 ```

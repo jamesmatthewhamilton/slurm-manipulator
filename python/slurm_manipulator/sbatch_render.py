@@ -28,6 +28,8 @@ def _build_extra_directives(sbatch_params: dict) -> str:
 
 def _endpoint_file_for_sbatch(file_pattern: str) -> str:
     """Convert config-time ${job_id} into runtime $SLURM_JOB_ID for Bash."""
+    if file_pattern.startswith("~/"):
+        file_pattern = "${HOME}/" + file_pattern[2:]
     return file_pattern.replace("${job_id}", "$SLURM_JOB_ID")
 
 
@@ -61,9 +63,14 @@ def render_sbatch(template_path: str, cluster_cfg: dict,
         "model": session_cfg.get("model", ""),
         "ollama_bin": paths.get("ollama_bin", "ollama"),
         "ollama_models_dir": paths.get("ollama_models_dir", ""),
-        "log_dir": paths.get("log_dir", "."),
+        # sbatch directives are not shell-expanded. SSH submission runs in the
+        # remote home, so a home-relative log directory must be relative here.
+        "log_dir": paths.get("log_dir", ".").removeprefix("~/"),
         "endpoint_file": _endpoint_file_for_sbatch(endpoint.get("file_pattern", "")),
         "extra_sbatch_directives": _build_extra_directives(sbatch_params),
+        "num_ctx": str(sbatch_params.get("num_ctx", 8192)),
+        "load_timeout": str(sbatch_params.get("load_timeout", "10m")),
+        "preload_timeout": str(sbatch_params.get("preload_timeout", 900)),
     }
     # Pass through anything in sbatch_params (partition, gres, cpus, mem, time,
     # port, ...). Optional directive keys are also fine to leave in — they're

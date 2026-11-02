@@ -7,7 +7,9 @@ from slurm_manipulator.ssh_cmd import _scp_cmd, _ssh_cmd
 
 def test_ssh_cmd_no_password():
     cmd = _ssh_cmd(["alice@host", "echo ok"])
-    assert cmd == ["ssh", "alice@host", "echo ok"]
+    assert cmd[0] == "ssh"
+    assert "ConnectTimeout=10" in cmd
+    assert cmd[-2:] == ["alice@host", "echo ok"]
 
 
 def test_ssh_cmd_with_password_uses_sshpass(monkeypatch):
@@ -25,7 +27,9 @@ def test_ssh_cmd_with_password_missing_sshpass(monkeypatch):
 
 def test_scp_cmd_no_password():
     cmd = _scp_cmd(["a", "b"])
-    assert cmd == ["scp", "a", "b"]
+    assert cmd[0] == "scp"
+    assert "ConnectTimeout=10" in cmd
+    assert cmd[-2:] == ["a", "b"]
 
 
 def test_scp_cmd_with_password(monkeypatch):

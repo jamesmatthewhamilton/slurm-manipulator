@@ -62,7 +62,7 @@ def test_basic_substitution(tmp_path):
     assert "OLLAMA=/opt/ollama" in out
     assert 'run "llama3.1:70b"' in out
     # ${job_id} -> $SLURM_JOB_ID, not the actual id (we don't know it yet).
-    assert "~/ollama-endpoint-$SLURM_JOB_ID.txt" in out
+    assert "${HOME}/ollama-endpoint-$SLURM_JOB_ID.txt" in out
     # $SLURM_JOB_ID survives — bash will resolve at runtime.
     assert "echo \"$SLURM_JOB_ID\"" in out
 
@@ -102,7 +102,7 @@ def test_unknown_variable_left_intact(tmp_path):
 
 
 def test_endpoint_file_for_sbatch():
-    assert _endpoint_file_for_sbatch("~/x-${job_id}.txt") == "~/x-$SLURM_JOB_ID.txt"
+    assert _endpoint_file_for_sbatch("~/x-${job_id}.txt") == "${HOME}/x-$SLURM_JOB_ID.txt"
 
 
 def test_endpoint_file_for_client():

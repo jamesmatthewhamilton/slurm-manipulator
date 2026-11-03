@@ -100,23 +100,16 @@ def find_existing_job(ssh_target: str, ssh_user: str, job_name: str,
 def submit_sbatch(ssh_target: str, sbatch_text: str, remote_basename: str,
                   log_dir: str, ssh_password: str = "") -> str:
     """Send rendered sbatch to remote, fix CRLF, sbatch it, return job_id."""
-    # Ensure log_dir exists.
-    try:
-        subprocess.run(
-                _ssh_cmd([ssh_target, f"mkdir -p {_remote_path(log_dir)}"], ssh_password),
-            capture_output=True, timeout=15, check=True,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ConnectionError(
-            f"SSH connection to {ssh_target} timed out. Are you on the VPN?"
-        ) from exc
+    # Preparation is idempotent, so a transport failure can safely be retried.
+    _run_ssh(
+        [ssh_target, f"mkdir -p {_remote_path(log_dir)}"], ssh_password,
+    ).check_returncode()
 
-    # SCP via stdin: write the rendered text to a file on the remote.
+    # Write the entire script again if an upload is interrupted.
     remote_path = _remote_path(f"~/{remote_basename}")
-    proc = subprocess.run(
-        _ssh_cmd([ssh_target, f"cat > {remote_path}"], ssh_password),
-        input=sbatch_text, text=True,
-        capture_output=True, timeout=30,
+    proc = _run_ssh(
+        [ssh_target, f"cat > {remote_path}"], ssh_password,
+        input_text=sbatch_text, timeout=30,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -125,11 +118,11 @@ def submit_sbatch(ssh_target: str, sbatch_text: str, remote_basename: str,
         )
 
     # Belt-and-braces CRLF strip on the remote.
-    subprocess.run(
-        _ssh_cmd([ssh_target, f"sed -i 's/\\r$//' {remote_path}"], ssh_password),
-        capture_output=True, timeout=15, check=True,
-    )
+    _run_ssh(
+        [ssh_target, f"sed -i 's/\\r$//' {remote_path}"], ssh_password,
+    ).check_returncode()
 
+    # Never retry submission: the job may exist even when its reply is lost.
     submit = subprocess.run(
         _ssh_cmd([ssh_target, f"sbatch {remote_path}"], ssh_password),
         capture_output=True, text=True, timeout=30,
@@ -207,7 +200,7 @@ def read_endpoint_file(ssh_target: str, endpoint_path: str,
                 ),
                 capture_output=True, text=True, timeout=15,
             )
-            parsed = parse_endpoint_url(result.stdout)
+            parsed = parse_endpoint_url(result.stdout) if result.returncode == 0 else None
             if parsed:
                 logger.info(f"  Found endpoint: http://{parsed[0]}:{parsed[1]}")
                 gateway = None

@@ -52,17 +52,19 @@ def _scp_cmd(extra_args: list, ssh_password: str = "") -> list:
 
 
 def _run_ssh(extra_args: list, ssh_password: str = "", timeout: int = 15,
-             *, retry_nonzero: bool = False):
+             *, retry_nonzero: bool = False, input_text: str | None = None):
     """Retry transport failures for reads and idempotent remote commands.
 
     Scheduler reads may opt into retrying remote nonzero exits in the same budget.
+    Idempotent uploads can provide input_text, replayed unchanged on each attempt.
     Job submission deliberately does not use this helper: a lost sbatch reply
     does not establish that submission failed.
     """
     for attempt in range(3):
         try:
             result = subprocess.run(_ssh_cmd(extra_args, ssh_password),
-                                    capture_output=True, text=True, timeout=timeout)
+                                    capture_output=True, text=True, timeout=timeout,
+                                    input=input_text)
             if result.returncode != 255 and (
                     not retry_nonzero or result.returncode == 0 or attempt == 2):
                 return result

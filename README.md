@@ -27,6 +27,12 @@ prefers RUNNING jobs over CONFIGURING and PENDING jobs. Polling checks terminal
 states in accounting when jobs disappear from the queue. Submission is not
 retried after an ambiguous SSH failure.
 
+Preparing the remote log directory, uploading the script, and stripping CRLF
+also retry transport failures within three attempts. Upload retries resend the
+complete script. Exhausted retries or remote command errors stop before
+submission. Only successful endpoint reads are accepted; partial stdout from
+a failed SSH command does not establish readiness.
+
 The bundled Ollama template chooses an available port, checks listener and
 preload success, publishes the endpoint atomically, and removes it on exit.
 `num_ctx`, `load_timeout`, and `preload_timeout` are configurable sbatch

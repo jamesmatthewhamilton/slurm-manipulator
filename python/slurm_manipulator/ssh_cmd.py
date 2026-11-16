@@ -52,14 +52,18 @@ def _scp_cmd(extra_args: list, ssh_password: str = "") -> list:
 
 
 def _run_ssh(extra_args: list, ssh_password: str = "", timeout: int = 15,
-             *, retry_nonzero: bool = False, input_text: str | None = None):
+             *, retry_nonzero: bool = False, input_text: str | None = None,
+             operation: str | None = None):
     """Retry transport failures for reads and idempotent remote commands.
 
     Scheduler reads may opt into retrying remote nonzero exits in the same budget.
     Idempotent uploads can provide input_text, replayed unchanged on each attempt.
     Job submission deliberately does not use this helper: a lost sbatch reply
     does not establish that submission failed.
+    operation is an optional static label for diagnostics, never command text
+    or uploaded content.
     """
+    context = f" during {operation}" if operation else ""
     for attempt in range(3):
         try:
             result = subprocess.run(_ssh_cmd(extra_args, ssh_password),
@@ -75,6 +79,6 @@ def _run_ssh(extra_args: list, ssh_password: str = "", timeout: int = 15,
                 stderr = stderr.decode(errors="replace")
             last_failure = f"timed out after {timeout}s; stderr: {stderr.strip() or '(empty)'}"
         if attempt < 2:
-            logger.info(f"  SSH command unavailable ({last_failure}); retrying remote command...")
+            logger.info(f"  SSH command unavailable{context} ({last_failure}); retrying remote command...")
             time.sleep(2 ** attempt)
-    raise ConnectionError(f"SSH command failed after three attempts; remote state is unknown ({last_failure})")
+    raise ConnectionError(f"SSH command failed after three attempts{context}; remote state is unknown ({last_failure})")

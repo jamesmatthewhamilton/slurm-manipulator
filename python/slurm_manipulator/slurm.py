@@ -87,7 +87,7 @@ def find_existing_job(ssh_target: str, ssh_user: str, job_name: str,
     """
     result = _run_ssh(
         [ssh_target, f"squeue -u {shlex.quote(ssh_user)} -h -o '%T %j %i'"],
-        ssh_password, retry_nonzero=True,
+        ssh_password, retry_nonzero=True, operation="Slurm job discovery",
     )
     if result.returncode != 0:
         raise ConnectionError(
@@ -103,13 +103,14 @@ def submit_sbatch(ssh_target: str, sbatch_text: str, remote_basename: str,
     # Preparation is idempotent, so a transport failure can safely be retried.
     _run_ssh(
         [ssh_target, f"mkdir -p {_remote_path(log_dir)}"], ssh_password,
+        operation="remote log directory creation",
     ).check_returncode()
 
     # Write the entire script again if an upload is interrupted.
     remote_path = _remote_path(f"~/{remote_basename}")
     proc = _run_ssh(
         [ssh_target, f"cat > {remote_path}"], ssh_password,
-        input_text=sbatch_text, timeout=30,
+        input_text=sbatch_text, timeout=30, operation="batch script upload",
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -120,6 +121,7 @@ def submit_sbatch(ssh_target: str, sbatch_text: str, remote_basename: str,
     # Belt-and-braces CRLF strip on the remote.
     _run_ssh(
         [ssh_target, f"sed -i 's/\\r$//' {remote_path}"], ssh_password,
+        operation="batch script line-ending cleanup",
     ).check_returncode()
 
     # Never retry submission: the job may exist even when its reply is lost.
@@ -148,7 +150,9 @@ TERMINAL_STATES = {
 def _state(ssh_target, job_id, ssh_password, accounting=False):
     command = (f"sacct -j {shlex.quote(job_id)} -X -n -o State%40" if accounting else
                f"squeue -j {shlex.quote(job_id)} -h -o '%T'")
-    result = _run_ssh([ssh_target, command], ssh_password, retry_nonzero=True)
+    operation = "Slurm accounting state read" if accounting else "Slurm queue state read"
+    result = _run_ssh([ssh_target, command], ssh_password, retry_nonzero=True,
+                      operation=operation)
     result.check_returncode()
     state = result.stdout.strip()
     return state.split()[0].rstrip("+") if state else ""
@@ -190,6 +194,7 @@ def read_endpoint_file(ssh_target: str, endpoint_path: str,
     """
     logger.info(f"  Waiting for endpoint file: {endpoint_path}")
     start = time.time()
+    last_state_error = None
     while time.time() - start < total_timeout:
         try:
             result = subprocess.run(
@@ -213,13 +218,23 @@ def read_endpoint_file(ssh_target: str, endpoint_path: str,
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         if job_id:
-            raise_if_job_ended(ssh_target, job_id, ssh_password)
+            try:
+                raise_if_job_ended(ssh_target, job_id, ssh_password)
+            except ConnectionError as exc:
+                # An unavailable scheduler does not mean this known job ended.
+                # Keep checking its endpoint within the existing readiness budget.
+                last_state_error = exc
+                logger.info(
+                    "  Slurm state unavailable for job %s; continuing endpoint wait: %s",
+                    job_id, exc,
+                )
         time.sleep(poll_interval)
 
+    state_detail = f"; last Slurm state read error: {last_state_error}" if last_state_error else ""
     raise ConnectionError(
         f"Endpoint file not found after {total_timeout}s: "
-        f"{ssh_target}:{endpoint_path}"
-    )
+        f"{ssh_target}:{endpoint_path}{state_detail}"
+    ) from last_state_error
 
 
 def _remote_path(path):

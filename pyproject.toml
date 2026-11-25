@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slurm-manipulator"
-version = "0.3.0"
+version = "0.3.1"
 description = "Primitive tools for Slurm job manipulation over SSH (stdlib only)"
 readme = "README.md"
 requires-python = ">=3.10"

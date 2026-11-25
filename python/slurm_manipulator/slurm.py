@@ -147,6 +147,15 @@ TERMINAL_STATES = {
 }
 
 
+class JobEndedError(RuntimeError):
+    """The scheduler confirmed a terminal state for this job."""
+
+    def __init__(self, job_id, state, message):
+        super().__init__(message)
+        self.job_id = job_id
+        self.state = state
+
+
 def _state(ssh_target, job_id, ssh_password, accounting=False):
     command = (f"sacct -j {shlex.quote(job_id)} -X -n -o State%40" if accounting else
                f"squeue -j {shlex.quote(job_id)} -h -o '%T'")
@@ -163,7 +172,8 @@ def raise_if_job_ended(ssh_target, job_id, ssh_password=""):
     if not state:
         state = _state(ssh_target, job_id, ssh_password, accounting=True)
     if state in TERMINAL_STATES:
-        raise RuntimeError(f"Slurm job {job_id} ended before Ollama was ready (state: {state}).")
+        raise JobEndedError(job_id, state,
+                            f"Slurm job {job_id} ended before Ollama was ready (state: {state}).")
 
 
 def poll_until_running(ssh_target, job_id, ssh_password="", poll_interval=10, total_timeout=3600):
@@ -177,7 +187,7 @@ def poll_until_running(ssh_target, job_id, ssh_password="", poll_interval=10, to
         if empty >= 3:
             state = _state(ssh_target, job_id, ssh_password, accounting=True)
         if state in TERMINAL_STATES:
-            raise RuntimeError(f"Slurm job {job_id} ended with state: {state}")
+            raise JobEndedError(job_id, state, f"Slurm job {job_id} ended with state: {state}")
         logger.info("Waiting for Slurm job %s (%s)", job_id, state or "temporarily absent")
         time.sleep(poll_interval)
     raise TimeoutError(f"Slurm job {job_id} did not start within {total_timeout}s")

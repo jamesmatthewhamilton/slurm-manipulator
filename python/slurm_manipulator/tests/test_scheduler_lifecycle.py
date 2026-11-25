@@ -16,8 +16,21 @@ def test_running_job_preferred_over_queued_or_finishing_jobs():
 @pytest.mark.parametrize("state", ["FAILED", "CANCELLED by 123", "OUT_OF_MEMORY", "TIMEOUT"])
 def test_terminal_state_in_accounting_aborts_preload(state):
     with patch.object(slurm, "_run_ssh", side_effect=[Mock(stdout=""), Mock(stdout=state)]):
-        with pytest.raises(RuntimeError, match="ended before Ollama was ready"):
+        with pytest.raises(slurm.JobEndedError, match="ended before Ollama was ready") as caught:
             slurm.raise_if_job_ended("target", "7")
+    assert isinstance(caught.value, RuntimeError)
+    assert caught.value.job_id == "7"
+    assert caught.value.state == state.split()[0]
+
+
+def test_terminal_state_while_queued_exposes_job_and_state():
+    with patch.object(slurm, "_state", return_value="TIMEOUT"), \
+         patch.object(slurm.time, "sleep") as sleep:
+        with pytest.raises(slurm.JobEndedError, match="ended with state: TIMEOUT") as caught:
+            slurm.poll_until_running("target", "7")
+    assert isinstance(caught.value, RuntimeError)
+    assert (caught.value.job_id, caught.value.state) == ("7", "TIMEOUT")
+    sleep.assert_not_called()
 
 
 def test_absent_queue_and_accounting_records_do_not_confirm_job_end():
@@ -64,7 +77,7 @@ def test_endpoint_wait_recovers_after_scheduler_read_retries_exhaust(failure):
 
     with patch.object(slurm.time, "time", side_effect=lambda: clock[0]), \
          patch.object(slurm.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)), \
-         patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd: args), \
+         patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd, **kwargs: args), \
          patch.object(slurm, "_ssh_cmd", side_effect=lambda args, pwd: args), \
          patch.object(slurm.subprocess, "run", side_effect=run):
         assert slurm.read_endpoint_file("target", "~/endpoint-7", job_id="7", include_gateway=True) == (
@@ -139,7 +152,7 @@ def test_submission_preparation_recovers_transport_failure(stage, failure):
         return subprocess.CompletedProcess(command, 0, stdout, "")
 
     script = "#!/bin/bash\n#SBATCH --job-name=model\necho ready\n"
-    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd: args), \
+    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd, **kwargs: args), \
          patch.object(slurm, "_ssh_cmd", side_effect=lambda args, pwd: args), \
          patch("slurm_manipulator.ssh_cmd.time.sleep"), \
          patch.object(slurm.subprocess, "run", side_effect=run):
@@ -168,7 +181,7 @@ def test_preparation_exhaustion_identifies_stage_and_never_submits(stage, operat
             result.check_returncode()
         return result
 
-    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd: args), \
+    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd, **kwargs: args), \
          patch.object(slurm, "_ssh_cmd", side_effect=lambda args, pwd: args), \
          patch("slurm_manipulator.ssh_cmd.time.sleep"), \
          patch.object(slurm.subprocess, "run", side_effect=run):
@@ -185,7 +198,7 @@ def test_preparation_exhaustion_identifies_stage_and_never_submits(stage, operat
     (lambda: slurm._state("target", "7", "", accounting=True), "Slurm accounting state read"),
 ])
 def test_scheduler_timeout_identifies_operation(read, operation):
-    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd: args), \
+    with patch("slurm_manipulator.ssh_cmd._ssh_cmd", side_effect=lambda args, pwd, **kwargs: args), \
          patch("slurm_manipulator.ssh_cmd.time.sleep"), \
          patch.object(slurm.subprocess, "run", side_effect=subprocess.TimeoutExpired("ssh", 15)) as run:
         with pytest.raises(ConnectionError, match=operation):

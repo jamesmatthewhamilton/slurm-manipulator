@@ -56,6 +56,7 @@ def _run_ssh(extra_args: list, ssh_password: str = "", timeout: int = 15,
              operation: str | None = None):
     """Retry transport failures for reads and idempotent remote commands.
 
+    After a timeout or disconnect, remaining attempts bypass connection sharing.
     Scheduler reads may opt into retrying remote nonzero exits in the same budget.
     Idempotent uploads can provide input_text, replayed unchanged on each attempt.
     Job submission deliberately does not use this helper: a lost sbatch reply
@@ -64,16 +65,20 @@ def _run_ssh(extra_args: list, ssh_password: str = "", timeout: int = 15,
     or uploaded content.
     """
     context = f" during {operation}" if operation else ""
+    multiplex = True
     for attempt in range(3):
         try:
-            result = subprocess.run(_ssh_cmd(extra_args, ssh_password),
+            result = subprocess.run(_ssh_cmd(extra_args, ssh_password, multiplex=multiplex),
                                     capture_output=True, text=True, timeout=timeout,
                                     input=input_text)
             if result.returncode != 255 and (
                     not retry_nonzero or result.returncode == 0 or attempt == 2):
                 return result
+            if result.returncode == 255:
+                multiplex = False
             last_failure = f"exit status {result.returncode}; stderr: {result.stderr.strip() or '(empty)'}"
         except subprocess.TimeoutExpired as exc:
+            multiplex = False
             stderr = exc.stderr or ""
             if isinstance(stderr, bytes):
                 stderr = stderr.decode(errors="replace")

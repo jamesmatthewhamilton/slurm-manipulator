@@ -21,6 +21,7 @@ Bundled assets:
 
 from .sbatch_render import endpoint_file_for_client, render_sbatch
 from .slurm import (
+    JobEndedError,
     cancel_job,
     find_existing_job,
     parse_endpoint_url,
@@ -35,6 +36,7 @@ from .slurm import (
 )
 
 __all__ = [
+    "JobEndedError",
     # lifecycle
     "submit_sbatch",
     "find_existing_job",
